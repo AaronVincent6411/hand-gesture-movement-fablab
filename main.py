@@ -110,6 +110,9 @@ while True:
             stable_y_px = h - int((stable_height_mm / MAX_PHYSICAL_HEIGHT_MM) * h)
             cv2.circle(frame, (wx, stable_y_px), 8, (0, 255, 255), -1)
 
+    else:
+        stable_height_mm=0
+
     cv2.rectangle(frame, (0, h-180), (350, h), (20, 20, 20), -1)
     
     cv2.putText(frame, f"Height: {stable_height_mm} mm", (15, h - 140),
