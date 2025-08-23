@@ -3,6 +3,8 @@
 import asyncio
 import math
 import websockets
+from main import video_capture_coordinates
+
 
 # ============================================================================
 # CONFIGURATION
@@ -17,6 +19,7 @@ BUSY_RETRY_DELAY = 0.5
 BUSY_MAX_RETRIES = 3
 SEND_MIN_INTERVAL = 0.25
 IDLE_STOP_TIMEOUT = 10.0
+
 
 # ============================================================================
 # GLOBAL STATE
@@ -101,7 +104,7 @@ async def send_commad(ws, mean_height, radious, x_angle, y_angle):
 # ============================================================================
 # DEMO SEQUENCE
 # ============================================================================
-async def demo_sequence(ws):
+async def demo_sequence(ws, height, curv_radius, roll, pitch):
     """Execute choreographed demo using send_commad."""
     print("\n" + "=" * 70)
     print("DEMO SEQUENCE: MOV POSCURVANG")
@@ -113,11 +116,15 @@ async def demo_sequence(ws):
     try:
         # 1. Height sweep (flat plane)
         print("[DEMO] Height sweep")
-        await send_commad(ws, 1000, 10000, 0, 0)
+
+        print(height)
+        print(roll)
+        # ws, height, radius, roll, pitch
+        await send_commad(ws, height, curv_radius, roll, pitch)
         await asyncio.sleep(6)
-        await send_commad(ws, 2000, 10000, 0, 0)
+        await send_commad(ws, height, curv_radius, roll, pitch)
         await asyncio.sleep(6)
-        await send_commad(ws, 100, 10000, 0, 0)
+        await send_commad(ws, height, curv_radius, roll, pitch)
         await asyncio.sleep(6)
 
         # 2. Circular tilt pattern
@@ -189,7 +196,9 @@ async def send_loop(ws):
                     continue
 
                 if cmd.lower() == "demo":
-                    await demo_sequence(ws)
+                    height, curv_radius, roll, pitch = video_capture_coordinates()
+
+                    await demo_sequence(ws, height, curv_radius, roll, pitch)
                     continue
 
                 if cmd.lower() in ['exit', 'quit']:
@@ -310,6 +319,7 @@ async def maintain_connection():
 # MAIN ENTRY POINT
 # ============================================================================
 if __name__ == "__main__":
+
     print(f"\nESP32 WebSocket Terminal - {ESP32_IP}")
     print("Commands: Type any ESP32 command, 'exit' to quit\n")
     print("=" * 70)
@@ -323,5 +333,4 @@ if __name__ == "__main__":
         asyncio.run(maintain_connection())
     except KeyboardInterrupt:
         print("\n[+] Exiting")
-
 
