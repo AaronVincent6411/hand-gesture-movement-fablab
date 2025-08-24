@@ -121,42 +121,39 @@ async def demo_sequence(ws, height, curv_radius, roll, pitch):
         print(roll)
         # ws, height, radius, roll, pitch
         await send_commad(ws, height, curv_radius, roll, pitch)
-        await asyncio.sleep(6)
-        await send_commad(ws, height, curv_radius, roll, pitch)
-        await asyncio.sleep(6)
-        await send_commad(ws, height, curv_radius, roll, pitch)
+        # await send_commad(ws, 1000, 10000, 0, 0)
         await asyncio.sleep(6)
 
-        # 2. Circular tilt pattern
-        print("[DEMO] Circular tilt sweep")
-        for angle_deg in range(0, 361, 30):
-            angle_rad = math.radians(angle_deg)
-            x_tilt = round(40 * math.cos(angle_rad))
-            y_tilt = round(40 * math.sin(angle_rad))
-            await send_commad(ws, 1000, 10000, x_tilt, y_tilt)
-            await asyncio.sleep(1)
+        # # 2. Circular tilt pattern
+        # print("[DEMO] Circular tilt sweep")
+        # for angle_deg in range(0, 361, 30):
+        #     angle_rad = math.radians(angle_deg)
+        #     x_tilt = round(40 * math.cos(angle_rad))
+        #     y_tilt = round(40 * math.sin(angle_rad))
+        #     await send_commad(ws, 1000, 10000, x_tilt, y_tilt)
+        #     await asyncio.sleep(1)
 
-        # 3. Radius morph (flat to curved)
-        print("[DEMO] Radius morph 5000 -> 700")
-        for radius in range(5000, 699, -400):
-            await send_commad(ws, 900, radius, 0, 0)
-            await asyncio.sleep(1)
+        # # 3. Radius morph (flat to curved)
+        # print("[DEMO] Radius morph 5000 -> 700")
+        # for radius in range(5000, 699, -400):
+        #     await send_commad(ws, 900, radius, 0, 0)
+        #     await asyncio.sleep(1)
 
-        # 4. Curved surface tilt
-        print("[DEMO] Tilting curved surface (radius=1500)")
-        tilt_angles = [0, 20, 40, 20, 0, -20, -40, -20, 0]
-        for x_angle in tilt_angles:
-            await send_commad(ws, 1200, 1500, x_angle, 0)
-            await asyncio.sleep(1)
+        # # 4. Curved surface tilt
+        # print("[DEMO] Tilting curved surface (radius=1500)")
+        # tilt_angles = [0, 20, 40, 20, 0, -20, -40, -20, 0]
+        # for x_angle in tilt_angles:
+        #     await send_commad(ws, 1200, 1500, x_angle, 0)
+        #     await asyncio.sleep(1)
 
-        # 5. Sphere up/down sweep
-        print("[DEMO] Sphere up and down sweep")
-        await send_commad(ws, 600, 0, 0, 0)
-        await asyncio.sleep(6)
-        for z in range(600, 1400, 200):
-            await send_commad(ws, z, 0, 0, 0)
-        for z in range(1400, 600, -200):
-            await send_commad(ws, z, 0, 0, 0)
+        # # 5. Sphere up/down sweep
+        # print("[DEMO] Sphere up and down sweep")
+        # await send_commad(ws, 600, 0, 0, 0)
+        # await asyncio.sleep(6)
+        # for z in range(600, 1400, 200):
+        #     await send_commad(ws, z, 0, 0, 0)
+        # for z in range(1400, 600, -200):
+        #     await send_commad(ws, z, 0, 0, 0)
 
         print("\n[+] Demo sequence complete!\n")
     except Exception as e:
