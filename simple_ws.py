@@ -232,7 +232,7 @@ async def send_loop(ws):
 # ============================================================================
 # CONNECTION MANAGEMENT
 # ============================================================================
-async def maintain_connection():
+async def maintain_connection(ws):
     """Main loop with auto-reconnect."""
     # while True:
     #     video_capture_coordinates()
