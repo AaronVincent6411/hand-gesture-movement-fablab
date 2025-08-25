@@ -185,6 +185,7 @@ async def send_loop(ws):
     loop = asyncio.get_event_loop()
     try:
         while True:
+            height, curv_radius, roll, pitch = video_capture_coordinates()
             try:
                 cmd = await loop.run_in_executor(None, input, "ESP32> ")
                 cmd = cmd.strip()
@@ -193,7 +194,6 @@ async def send_loop(ws):
                     continue
 
                 if cmd.lower() == "demo":
-                    height, curv_radius, roll, pitch = video_capture_coordinates()
 
                     await demo_sequence(ws, height, curv_radius, roll, pitch)
                     continue
@@ -234,7 +234,8 @@ async def send_loop(ws):
 # ============================================================================
 async def maintain_connection():
     """Main loop with auto-reconnect."""
-    ws = None
+    # while True:
+    #     video_capture_coordinates()
 
     while True:
         try:

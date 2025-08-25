@@ -9,8 +9,6 @@ MAX_RADIUS = 10000          # Flat plane
 MIN_CURVE_RADIUS = 700      # Minimum radius before snapping to sphere
 FIST_THRESHOLD_RATIO = 1.3  # Ratio of Wrist-Tip vs Wrist-MCP to detect fist
 
-cap = cv2.VideoCapture(0)
-
 class Kalman2D:
     def __init__(self):
         self.kalman = cv2.KalmanFilter(4, 2)
@@ -42,6 +40,8 @@ mp_draw = mp.solutions.drawing_utils
 
 def video_capture_coordinates():
 
+    cap = cv2.VideoCapture(0)
+    
     current_z_mm = 0
     current_radius = 10000
 
@@ -160,9 +160,6 @@ def video_capture_coordinates():
             break
 
         return current_z_mm, current_radius, pitch_angle, roll_angle
-
-if __name__ == '__main__':
-
-    video_capture_coordinates()
+    
     cap.release()
     cv2.destroyAllWindows()
