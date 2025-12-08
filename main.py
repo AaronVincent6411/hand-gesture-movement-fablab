@@ -50,8 +50,6 @@ kf = Kalman2D()
 
 cap = cv2.VideoCapture(0)
 
-prev_x, prev_y = None, None
-
 while True:
     success, frame = cap.read()
     if not success:
@@ -62,8 +60,10 @@ while True:
     result = hands.process(rgb)
 
     h, w, _ = frame.shape
-
     DIRECTION = "no movement"
+    
+    # Variable to hold height for display
+    ball_height_px = 0
 
     if result.multi_hand_landmarks:
 
@@ -72,7 +72,27 @@ while True:
             hand = result.multi_hand_landmarks[0]
 
             # ---------------------------------------------------
-            # COMPUTE CENTER OF HAND (finger wiggle proof)
+            # 1. FLOATING BALL HEIGHT (Wrist to Floor)
+            # ---------------------------------------------------
+            # Get Wrist Coordinates (Landmark 0)
+            wrist_lm = hand.landmark[0]
+            wrist_x = int(wrist_lm.x * w)
+            wrist_y = int(wrist_lm.y * h)
+
+            # Calculate Height: Distance from Wrist(y) to Bottom(h)
+            ball_height_px = max(0, h - wrist_y)
+
+            # Visuals: Line from wrist to floor
+            cv2.line(frame, (wrist_x, wrist_y), (wrist_x, h), (0, 255, 255), 2)
+            cv2.circle(frame, (wrist_x, wrist_y), 6, (0, 0, 255), -1) # Red dot on wrist
+            
+            # Display Height text next to wrist
+            cv2.putText(frame, f"{ball_height_px}px", (wrist_x + 10, wrist_y), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
+
+            # ---------------------------------------------------
+            # 2. COMPUTE CENTER OF HAND (For Kalman/Motion)
             # ---------------------------------------------------
             xs = [lm.x for lm in hand.landmark]
             ys = [lm.y for lm in hand.landmark]
@@ -87,7 +107,7 @@ while True:
             THRESH = min(w, h) * 0.1   # 10% threshold
 
             # ---------------------------------------------------
-            # REAL WAVE DETECTION (finger wiggle won't trigger)
+            # 3. REAL WAVE DETECTION
             # ---------------------------------------------------
             if abs(vx) < THRESH and abs(vy) < THRESH:
                 DIRECTION = "no movement"
@@ -101,10 +121,17 @@ while True:
 
             mp_draw.draw_landmarks(frame, hand, mp_hands.HAND_CONNECTIONS)
 
-    cv2.putText(frame, DIRECTION, (30, 50),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 0, 0), 4)
+    # UI Displays
+    # 1. Direction Text (Top Left)
+    cv2.putText(frame, f"Motion: {DIRECTION}", (30, 50),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2)
+    
+    # 2. Height Text (Bottom Left - Fixed position for easier reading)
+    if ball_height_px > 0:
+        cv2.putText(frame, f"Ball Height: {ball_height_px}", (30, h - 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
 
-    cv2.imshow("Anti-Finger-Wiggle Hand Movement Detection", frame)
+    cv2.imshow("Hand Control: Motion + Height", frame)
 
     if cv2.waitKey(1) & 0xFF == 27:
         break
