@@ -4,7 +4,7 @@ import numpy as np
 import math
 
 # -------------------------------
-# 2D Kalman Filter (Kept for smooth motion detection)
+# 2D Kalman Filter
 # -------------------------------
 class Kalman2D:
     def __init__(self):
@@ -25,15 +25,31 @@ class Kalman2D:
         return correct[0,0], correct[1,0], correct[2,0], correct[3,0]
 
 # -------------------------------
+# Configuration
+# -------------------------------
+MAX_PHYSICAL_HEIGHT_MM = 2200  
+HEIGHT_STABILITY_THRESHOLD = 40  # mm (Movement < 40mm will be ignored)
+
+# -------------------------------
 # Mediapipe & Setup
 # -------------------------------
 mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.7)
+hands = mp_hands.Hands(
+    max_num_hands=1, 
+    min_detection_confidence=0.7, 
+    min_tracking_confidence=0.5
+)
 mp_draw = mp.solutions.drawing_utils
 
 kf = Kalman2D()
 
 cap = cv2.VideoCapture(0)
+
+# -------------------------------
+# STATE VARIABLES (Must be outside loop)
+# -------------------------------
+stable_height_mm = 0  # This holds the "locked" stable value
+prev_raw_height = 0
 
 while True:
     success, frame = cap.read()
@@ -45,122 +61,102 @@ while True:
     result = hands.process(rgb)
 
     h, w, _ = frame.shape
-    DIRECTION = "no movement"
     
-    # -----------------------------------------------------------
-    # OUTPUT VARIABLES FOR HEXAGONAL GRID
-    # -----------------------------------------------------------
-    ball_height_px = 0
-    angle_lr = 0   # Left/Right (Roll)
-    angle_fb = 0   # Forward/Backward (Pitch)
-
+    # Per-frame temporary variables
+    pitch_angle = 0  
+    roll_angle = 0   
+    fwd_bwd_state = "Neutral"
+    
     if result.multi_hand_landmarks:
-        if len(result.multi_hand_landmarks) == 1:
-            hand = result.multi_hand_landmarks[0]
+        for idx, hand_landmarks in enumerate(result.multi_hand_landmarks):
+            
+            hand_label = result.multi_handedness[idx].classification[0].label
+            
+            # Landmarks
+            wrist = hand_landmarks.landmark[0]
+            index_mcp = hand_landmarks.landmark[5]   
+            middle_mcp = hand_landmarks.landmark[9]  
+            pinky_mcp = hand_landmarks.landmark[17]  
 
-            # Landmarks: 0=Wrist, 9=Middle Finger MCP (Knuckle)
-            wrist = hand.landmark[0]
-            middle_mcp = hand.landmark[9]
-
-            # Convert X, Y to Pixels
+            # Convert to Pixels
             wx, wy = int(wrist.x * w), int(wrist.y * h)
+            ix, iy = int(index_mcp.x * w), int(index_mcp.y * h)
             mx, my = int(middle_mcp.x * w), int(middle_mcp.y * h)
-            
-            # Convert Z to approximate Pixels (MediaPipe Z is relative scale similar to X)
-            # We multiply by 'w' to make it comparable to X/Y for math
-            wz = wrist.z * w
-            mz = middle_mcp.z * w
+            px, py = int(pinky_mcp.x * w), int(pinky_mcp.y * h)
 
             # ---------------------------------------------------
-            # 1. HEIGHT (Floor to Wrist)
+            # 1. HEIGHT with STABILITY (Deadzone Logic)
             # ---------------------------------------------------
-            ball_height_px = max(0, h - wy)
+            pixel_height = max(0, h - wy)
+            
+            # Calculate current raw height in MM
+            raw_height_mm = int((pixel_height / h) * MAX_PHYSICAL_HEIGHT_MM)
+            raw_height_mm = max(0, min(MAX_PHYSICAL_HEIGHT_MM, raw_height_mm))
+            
+            # CHECK STABILITY:
+            # Only update the "stable" value if the change is larger than the threshold
+            diff = abs(raw_height_mm - stable_height_mm)
+            
+            if diff > HEIGHT_STABILITY_THRESHOLD:
+                stable_height_mm = raw_height_mm
+            
+            # ---------------------------------------------------
+            # 2. PITCH & ROLL ANGLES
+            # ---------------------------------------------------
+            pitch_dy = wy - my
+            pitch_dx = mx - wx
+            pitch_angle = int(math.degrees(math.atan2(pitch_dy, abs(pitch_dx) + 1)))
+
+            roll_dy = py - iy
+            roll_dx = px - ix
+            roll_angle = int(math.degrees(math.atan2(roll_dy, roll_dx)))
 
             # ---------------------------------------------------
-            # 2. LEFT / RIGHT ANGLE (Roll)
+            # 3. FORWARD / BACKWARD
             # ---------------------------------------------------
-            delta_x = mx - wx
-            delta_y = wy - my # Invert Y so Up is Positive
+            is_palm_facing = False
+            if hand_label == "Right":
+                if ix < px: is_palm_facing = True
+            else: # Left Hand
+                if ix > px: is_palm_facing = True
             
-            # Angle on the 2D Screen Plane
-            angle_lr = int(math.degrees(math.atan2(delta_x, delta_y)))
-            
-            # Clamp for stability
-            angle_lr = max(-90, min(90, angle_lr))
-
-            # ---------------------------------------------------
-            # 3. FORWARD / BACKWARD ANGLE (Pitch)
-            # ---------------------------------------------------
-            # Delta Z: How much closer/further is the knuckle compared to wrist?
-            # Note: Negative Z in MediaPipe = Closer to camera.
-            # If mz < wz: Knuckle closer than wrist -> Tilted Forward
-            
-            delta_z = wz - mz  # Positive value means Forward tilt
-            
-            # We compute angle against the Vertical Y axis
-            # This estimates how much we are leaning into the Z-plane
-            angle_fb = int(math.degrees(math.atan2(delta_z, delta_y)))
-            
-            # Clamp for stability
-            angle_fb = max(-90, min(90, angle_fb))
+            if is_palm_facing:
+                fwd_bwd_state = "FORWARD"
+                color_fb = (0, 255, 0)
+            else:
+                fwd_bwd_state = "BACKWARD"
+                color_fb = (0, 0, 255)
 
             # ---------------------------------------------------
             # VISUALIZATION
             # ---------------------------------------------------
-            # Draw Skeleton
-            mp_draw.draw_landmarks(frame, hand, mp_hands.HAND_CONNECTIONS)
+            mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
             
-            # Draw Height Line
-            cv2.line(frame, (wx, wy), (wx, h), (0, 255, 255), 2)
+            cv2.line(frame, (wx, wy), (mx, my), (0, 255, 255), 2) # Pitch
+            cv2.line(frame, (ix, iy), (px, py), (255, 0, 0), 2)   # Roll
             
-            # Draw Left/Right Tilt Line
-            cv2.line(frame, (wx, wy), (mx, my), (0, 255, 0), 3)
-
-            # ---------------------------------------------------
-            # 4. MOTION DETECTION (Kalman)
-            # ---------------------------------------------------
-            xs = [lm.x for lm in hand.landmark]
-            ys = [lm.y for lm in hand.landmark]
-            cx, cy = int(np.mean(xs) * w), int(np.mean(ys) * h)
-
-            x, y, vx, vy = kf.update(cx, cy)
-            THRESH = min(w, h) * 0.1
-
-            if abs(vx) < THRESH and abs(vy) < THRESH:
-                DIRECTION = "Stationary"
-            else:
-                if abs(vx) > abs(vy):
-                    DIRECTION = "Right" if vx > 0 else "Left"
-                else:
-                    DIRECTION = "Down" if vy > 0 else "Up"
+            # Draw Height Line (Visualize the stable level vs real level)
+            # Gray line = Current wrist pos, Yellow Dot = Stable reported pos
+            cv2.line(frame, (wx, wy), (wx, h), (100, 100, 100), 1) 
+            
+            # Calculate where the "Stable" height is on screen for visualization
+            stable_y_px = h - int((stable_height_mm / MAX_PHYSICAL_HEIGHT_MM) * h)
+            cv2.circle(frame, (wx, stable_y_px), 8, (0, 255, 255), -1)
 
     # ---------------------------------------------------
     # UI DASHBOARD
     # ---------------------------------------------------
-    # Box Background for UI
-    cv2.rectangle(frame, (0, h-160), (300, h), (0, 0, 0), -1)
+    cv2.rectangle(frame, (0, h-180), (350, h), (20, 20, 20), -1)
     
-    # 1. Height
-    cv2.putText(frame, f"Height: {ball_height_px}", (20, h - 120),
+    # Display the STABLE height, not the jittery raw height
+    cv2.putText(frame, f"Height: {stable_height_mm} mm", (15, h - 140),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
         
-    # 2. L/R Angle
-    col_lr = (0, 255, 0) if abs(angle_lr) < 15 else (0, 165, 255)
-    cv2.putText(frame, f"L/R Angle: {angle_lr} deg", (20, h - 80),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, col_lr, 2)
+    cv2.putText(frame, f"Pitch: {pitch_angle} deg", (15, h - 105),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
-    # 3. F/B Angle
-    col_fb = (0, 255, 0) if abs(angle_fb) < 15 else (255, 0, 255) # Purple if tilted
-    fb_text = "Flat"
-    if angle_fb > 15: fb_text = "Forward"
-    if angle_fb < -15: fb_text = "Backward"
-    
-    cv2.putText(frame, f"F/B Angle: {angle_fb} deg ({fb_text})", (20, h - 40),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, col_fb, 2)
-
-    # 4. Swipe Detection
-    cv2.putText(frame, f"Swipe: {DIRECTION}", (30, 50),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2)
+    cv2.putText(frame, f"Roll: {roll_angle} deg", (15, h - 70),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 100, 100), 2)
 
     cv2.imshow("Hexagonal Grid Controller", frame)
 
