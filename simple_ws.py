@@ -9,8 +9,11 @@ from main import video_capture_coordinates
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-ESP32_IP = "192.168.0.100"
-WS_URL = f"ws://{ESP32_IP}:80/ws"
+# ESP32_IP = "192.168.0.100"       <-- Comment this out
+ESP32_IP = "localhost"           # <-- Add this
+
+# WS_URL = f"ws://{ESP32_IP}:80/ws"    <-- Comment this out
+WS_URL = f"ws://{ESP32_IP}:8765/ws"  # <-- Use the mock server port (8765)
 RECONNECT_DELAY = 1
 RECONNECT_TIMEOUT = 2
 VERBOSE_MODE = False
