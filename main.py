@@ -3,6 +3,12 @@ import mediapipe as mp
 import numpy as np
 import math
 
+# --- Configuration Constants ---
+MAX_Z_HEIGHT_MM = 2200      # Bottom of screen = 2200, Top = 0
+MAX_RADIUS = 10000          # Flat plane
+MIN_CURVE_RADIUS = 700      # Minimum radius before snapping to sphere
+FIST_THRESHOLD_RATIO = 1.3  # Ratio of Wrist-Tip vs Wrist-MCP to detect fist
+
 class Kalman2D:
     def __init__(self):
         self.kalman = cv2.KalmanFilter(4, 2)
@@ -21,8 +27,8 @@ class Kalman2D:
         correct = self.kalman.correct(measurement)
         return correct[0,0], correct[1,0], correct[2,0], correct[3,0]
 
-MAX_PHYSICAL_HEIGHT_MM = 2200  
-HEIGHT_STABILITY_THRESHOLD = 40
+def calculate_distance(p1, p2):
+    return math.hypot(p2[0] - p1[0], p2[1] - p1[1])
 
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(
@@ -32,12 +38,10 @@ hands = mp_hands.Hands(
 )
 mp_draw = mp.solutions.drawing_utils
 
-kf = Kalman2D()
-
 cap = cv2.VideoCapture(0)
 
-stable_height_mm = 0
-prev_raw_height = 0
+current_z_mm = 0
+current_radius = 10000
 
 while True:
     success, frame = cap.read()
@@ -52,77 +56,101 @@ while True:
     
     pitch_angle = 0  
     roll_angle = 0   
-    fwd_bwd_state = "Neutral"
+    mode_status = "FLAT / CURVE"
+    color_status = (0, 255, 0)
     
     if result.multi_hand_landmarks:
         for idx, hand_landmarks in enumerate(result.multi_hand_landmarks):
             
-            hand_label = result.multi_handedness[idx].classification[0].label
-            
+            # Extract landmarks
             wrist = hand_landmarks.landmark[0]
             index_mcp = hand_landmarks.landmark[5]   
-            middle_mcp = hand_landmarks.landmark[9]  
-            pinky_mcp = hand_landmarks.landmark[17]  
-
+            middle_mcp = hand_landmarks.landmark[9]
+            middle_tip = hand_landmarks.landmark[12] # Used for open/close detection
+            pinky_mcp = hand_landmarks.landmark[17]
+            
+            # Convert to pixels
             wx, wy = int(wrist.x * w), int(wrist.y * h)
             ix, iy = int(index_mcp.x * w), int(index_mcp.y * h)
             mx, my = int(middle_mcp.x * w), int(middle_mcp.y * h)
+            tx, ty = int(middle_tip.x * w), int(middle_tip.y * h)
             px, py = int(pinky_mcp.x * w), int(pinky_mcp.y * h)
 
-            pixel_height = max(0, h - wy)
-            
-            raw_height_mm = int((pixel_height / h) * MAX_PHYSICAL_HEIGHT_MM)
-            raw_height_mm = max(0, min(MAX_PHYSICAL_HEIGHT_MM, raw_height_mm))
-            
-            diff = abs(raw_height_mm - stable_height_mm)
-            
-            if diff > HEIGHT_STABILITY_THRESHOLD:
-                stable_height_mm = raw_height_mm
-            
-            pitch_dy = wy - my
-            pitch_dx = mx - wx
-            pitch_angle = int(math.degrees(math.atan2(pitch_dy, abs(pitch_dx) + 1)))
+            # --- 1. Z-Height Calculation (0 to 2200) ---
+            # Top of screen (y=0) -> 0mm
+            # Bottom of screen (y=h) -> 2200mm
+            current_z_mm = int((wy / h) * MAX_Z_HEIGHT_MM)
+            current_z_mm = max(0, min(MAX_Z_HEIGHT_MM, current_z_mm))
 
-            roll_dy = py - iy
-            roll_dx = px - ix
-            roll_angle = int(math.degrees(math.atan2(roll_dy, roll_dx)))
+            # --- 2. Calculate Hand Openness (Radius) ---
+            # We compare distance of Wrist->Tip vs Wrist->MCP (Knuckle) to handle depth changes
+            dist_wrist_tip = calculate_distance((wx, wy), (tx, ty))
+            dist_wrist_mcp = calculate_distance((wx, wy), (mx, my))
+            
+            # Ratio: ~2.0 is Open Hand, ~1.0 is Fist
+            ratio = dist_wrist_tip / (dist_wrist_mcp + 1e-6) 
 
-            is_palm_facing = False
-            if hand_label == "Right":
-                if ix < px: is_palm_facing = True
+            # Map Ratio to Radius (1.3 to 2.2 maps to 700 to 10000)
+            if ratio < FIST_THRESHOLD_RATIO:
+                # --- FIST DETECTED (Sphere Mode) ---
+                current_radius = 0
+                pitch_angle = 0
+                roll_angle = 0
+                mode_status = "SPHERE (FIST)"
+                color_status = (0, 0, 255)
             else:
-                if ix > px: is_palm_facing = True
-            
-            if is_palm_facing:
-                fwd_bwd_state = "FORWARD"
-                color_fb = (0, 255, 0)
-            else:
-                fwd_bwd_state = "BACKWARD"
-                color_fb = (0, 0, 255)
+                # --- OPEN HAND (Curve/Flat Mode) ---
+                # Normalize ratio to range 0.0 to 1.0 (between 1.3 and 2.2)
+                norm_openness = (ratio - FIST_THRESHOLD_RATIO) / (2.2 - FIST_THRESHOLD_RATIO)
+                norm_openness = max(0, min(1, norm_openness))
+                
+                # Lerp between 700 and 10000
+                current_radius = 10000
 
+                # --- Calculate Angles Only when Open ---
+                # Pitch
+                pitch_dy = wy - my
+                pitch_dx = mx - wx
+                pitch_angle = int(math.degrees(math.atan2(pitch_dy, abs(pitch_dx) + 1)))
+                pitch_angle = max(-60, min(60, pitch_angle))
+
+                # Roll
+                roll_dy = py - iy
+                roll_dx = px - ix
+                roll_angle = int(math.degrees(math.atan2(roll_dy, roll_dx)))
+                roll_angle = max(-60, min(60, roll_angle))
+
+            # Visuals
             mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
             
-            cv2.line(frame, (wx, wy), (mx, my), (0, 255, 255), 2)
-            cv2.line(frame, (ix, iy), (px, py), (255, 0, 0), 2)
-            
-            cv2.line(frame, (wx, wy), (wx, h), (100, 100, 100), 1) 
-            
-            stable_y_px = h - int((stable_height_mm / MAX_PHYSICAL_HEIGHT_MM) * h)
-            cv2.circle(frame, (wx, stable_y_px), 8, (0, 255, 255), -1)
+            # Draw Wrist Line for Height
+            cv2.line(frame, (0, wy), (w, wy), (50, 50, 50), 1)
+            cv2.circle(frame, (wx, wy), 8, color_status, -1)
 
-    else:
-        stable_height_mm=0
-
-    cv2.rectangle(frame, (0, h-180), (350, h), (20, 20, 20), -1)
+    # --- Dashboard UI ---
+    cv2.rectangle(frame, (0, h-220), (400, h), (20, 20, 20), -1)
     
-    cv2.putText(frame, f"Height: {stable_height_mm} mm", (15, h - 140),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+    # Z Height
+    cv2.putText(frame, f"Z Height: {current_z_mm}", (15, h - 180),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+    
+    # Radius
+    cv2.putText(frame, f"Radius: {current_radius}", (15, h - 140),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2)
         
-    cv2.putText(frame, f"Pitch: {pitch_angle} deg", (15, h - 105),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+    # Pitch
+    color_p = (100, 100, 100) if current_radius == 0 else (0, 255, 255)
+    cv2.putText(frame, f"Pitch: {pitch_angle}", (15, h - 100),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, color_p, 2)
 
-    cv2.putText(frame, f"Roll: {roll_angle} deg", (15, h - 70),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 100, 100), 2)
+    # Roll
+    color_r = (100, 100, 100) if current_radius == 0 else (255, 100, 100)
+    cv2.putText(frame, f"Roll: {roll_angle}", (15, h - 60),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, color_r, 2)
+    
+    # Mode
+    cv2.putText(frame, f"Mode: {mode_status}", (15, h - 20),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color_status, 1)
 
     cv2.imshow("Hexagonal Grid Controller", frame)
 
