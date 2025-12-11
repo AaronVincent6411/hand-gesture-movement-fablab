@@ -97,6 +97,10 @@ class HandTracker:
                 # Draw
                 self.mp_draw.draw_landmarks(frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
                 cv2.circle(frame, (wx, wy), 8, color_status, -1)
+        else:
+            self.z = 0
+            
+            
 
         # Dashboard
         cv2.rectangle(frame, (0, h-60), (w, h), (20, 20, 20), -1)
